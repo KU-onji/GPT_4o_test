@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "gpt-4o-test"
+version = "0.1.0"
+description = ""
+authors = ["KU-onji <mgr_127@yahoo.co.jp>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+openai = "^1.29.0"
+requests = "^2.31.0"
+pre-commit = "^3.7.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
