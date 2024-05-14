@@ -1,8 +1,9 @@
-from utils import call_gpt, create_client
+from utils import summarize_pdf_on_web
 
-client = create_client()
-url = "https://arxiv.org/abs/2205.00976"
-prompt = f"この論文の要点をまとめてください: {url}"
-res = call_gpt(client, prompt)
-print(res.choices[0].message.content)
-print(res.usage.total_tokens)
+
+def main():
+    summarize_pdf_on_web(str(input("Enter arXiv URL of the PDF file: ")))
+
+
+if __name__ == "__main__":
+    main()

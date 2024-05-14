@@ -31,14 +31,14 @@ def create_vector_store(client: OpenAI, name: str = "Kuma_storage") -> str:
         name=name,
         expires_after={"anchor": "last_active_at", "days": 1},
     )
-    assert res_vs_create.status != "expired", f"Failed to create vector store: {res_vs_create.id}"
+    assert res_vs_create.status == "completed", f"Failed to create vector store: {res_vs_create.id}"
     print("Vector store created successfully.")
     print(f"Vector store ID: {res_vs_create.id}")
     return res_vs_create.id
 
 
 def upload_file_to_vs(client: OpenAI, vector_store_id: str, file) -> None:
-    res_file_create = client.beta.vector_stores.files.upload(vector_store_id=vector_store_id, file=file)
+    res_file_create = client.beta.vector_stores.files.upload_and_poll(vector_store_id=vector_store_id, file=file)
     while res_file_create.status == "in_progress":
         time.sleep(1)
     assert res_file_create.status == "completed", "Failed to upload file to vector store"
@@ -88,49 +88,57 @@ def delete_assistant(client: OpenAI, assistant_id: str) -> None:
     print(f"Assistant {assistant_id} deleted successfully.")
 
 
-def create_summarization_run(client: OpenAI, assistant_id: str):
-    run = client.beta.threads.create_and_run(assistant_id=assistant_id)
+def create_summarization_thread(client: OpenAI):
+    thread = client.beta.threads.create(messages=[{"role": "user", "content": "この論文を日本語で要約してください。"}])
+    return thread
+
+
+def run_thread(client: OpenAI, thread_id: str, assistant_id: str):
+    run = client.beta.threads.runs.create_and_poll(thread_id=thread_id, assistant_id=assistant_id)
     return run
 
 
-def create_request(prompt):
-    return {
-        "model": "gpt-4o",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 100,
-        "temperature": 0,
-    }
+def cancel_run(client: OpenAI, run_id: str, thread_id: str):
+    res_run_close = client.beta.threads.runs.cancel(run_id=run_id, thread_id=thread_id)
+    assert res_run_close.cancelled_at is not None, f"Failed to close run: {run_id}"
+    print(f"Run {run_id} closed successfully.")
 
 
-def call_gpt(client: OpenAI, prompt: dict):
-    request = create_request(prompt)
-    return client.chat.completions.create(**request)
-
-
-client = create_client()
-pdf_url = "https://arxiv.org/pdf/1902.10186"
-pdf_bytes = retrieve_pdf(pdf_url)
-pdf_path = create_pdf_file(pdf_bytes)
-vs_id = create_vector_store(client)
-assistant = create_file_search_assistant(client)
-start = time.time()
-with open(pdf_path, "rb") as pdf_file:
-    upload_file_to_vs(client, vs_id, pdf_file)
-print(f"Time taken to upload: {time.time() - start:.2f} seconds")
-os.remove(pdf_path)
-assistant = set_vs_id(client, assistant.id, vs_id)
-start = time.time()
-run = create_summarization_run(client, assistant.id)
-print(f"Time taken to summarize: {time.time() - start:.2f} seconds")
-message = list(client.beta.threads.messages.list(thread_id=run.thread_id, run_id=run.id))
-message_content = message[0].content[0].text
-annotations = message_content.annotations
-citations = []
-for index, annotation in enumerate(annotations):
-    message_content.value = message_content.value.replace(annotation.text, f"[{index}]")
-    if file_citation := getattr(annotation, "file_citation", None):
-        cited_file = client.files.retrieve(file_citation.file_id)
-        citations.append(f"[{index}] {cited_file.filename}")
-
-print(message_content.value)
-print("\n".join(citations))
+def summarize_pdf_on_web(pdf_url: str) -> str:
+    client = create_client()
+    pdf_bytes = retrieve_pdf(pdf_url)
+    pdf_path = create_pdf_file(pdf_bytes)
+    vs_id = create_vector_store(client)
+    assistant = create_file_search_assistant(client)
+    start = time.time()
+    with open(pdf_path, "rb") as pdf_file:
+        upload_file_to_vs(client, vs_id, pdf_file)
+    print(f"Time taken to upload: {time.time() - start:.2f} seconds")
+    os.remove(pdf_path)
+    assistant = set_vs_id(client, assistant.id, vs_id)
+    start = time.time()
+    thread = create_summarization_thread(client)
+    run = run_thread(client, thread.id, assistant.id)
+    print(f"Time taken to summarize: {time.time() - start:.2f} seconds")
+    message = list(client.beta.threads.messages.list(thread_id=run.thread_id, run_id=run.id))
+    message_content = message[0].content[0].text
+    annotations = message_content.annotations
+    citations = []
+    response = ""
+    for index, annotation in enumerate(annotations):
+        message_content.value = message_content.value.replace(annotation.text, f"[{index}]")
+        if file_citation := getattr(annotation, "file_citation", None):
+            cited_file = client.files.retrieve(file_citation.file_id)
+            citations.append(f"[{index}] {cited_file.filename}")
+    response = message_content.value
+    response += "\n".join(citations)
+    print(message_content.value)
+    print("\n".join(citations))
+    print(f"Total tokens: {run.usage.total_tokens}")
+    if run.status != "completed":
+        cancel_run(client, run.id, thread.id)
+    print(f"Run status: {run.status}")
+    delete_vector_store(client, vs_id)
+    delete_assistant(client, assistant.id)
+    print("All done!")
+    return response
