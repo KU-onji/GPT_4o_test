@@ -89,7 +89,14 @@ def delete_assistant(client: OpenAI, assistant_id: str) -> None:
 
 
 def create_summarization_thread(client: OpenAI):
-    thread = client.beta.threads.create(messages=[{"role": "user", "content": "この論文を日本語で要約してください。"}])
+    prompt = "与えられた機械学習に関する論文のPDFを読み、この論文のSummary、ProsとCons、技術的な新規性、実験で何を評価したのかを以下のような形式で日本語で述べてください。\n\n\
+        # Summary:\n\
+        # Pros:\n\
+        # Cons:\n\
+        # 技術的な新規性:\n\
+        # 実験評価:\
+        "
+    thread = client.beta.threads.create(messages=[{"role": "user", "content": prompt}])
     return thread
 
 
